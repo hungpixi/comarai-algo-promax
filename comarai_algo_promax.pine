@@ -168,6 +168,15 @@ prox_bear_fvg_active = ta.barssince(is_bear_fvg) <= 10
 long_cond =  (not use_trend or is_uptrend) and _rsi < rsi_os and prox_bull_fvg_active
 short_cond = (not use_trend or is_downtrend) and _rsi > rsi_ob and prox_bear_fvg_active
 
+// Distance Check Feature Simulation (Proxy structural SL condition)
+// XGBoost penalizes entries where the structural SL is too tight or too wide. 
+// We proxy this by ensuring the stop loss (recent swing) is a reasonable distance away. 
+prox_valid_sl_dist_bull = (close - l0) > ta.atr(14) * 0.5 
+prox_valid_sl_dist_bear = (h0 - close) > ta.atr(14) * 0.5 
+
+long_cond := long_cond and prox_valid_sl_dist_bull
+short_cond := short_cond and prox_valid_sl_dist_bear
+
 // Signal logic
 var int signal = 0
 if long_cond and signal <= 0
