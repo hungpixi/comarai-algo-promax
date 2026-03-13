@@ -36,11 +36,13 @@ i_fvg_lb     = input.int(10, "FVG Active Lookback", minval=1, group=grp_smc)
 i_show_fvg   = input.bool(true, "Show FVG Zones", group=grp_smc)
 i_show_ob    = input.bool(true, "Show Order Blocks", group=grp_smc)
 
-// Risk — from Python: SL_MIN=2.0, SL_MAX=5.0, RR=1.5, MAX_BARS_HOLD=30
-i_sl_min     = input.float(2.0, "Min SL Distance (price)", step=0.1, group=grp_risk)
-i_sl_max     = input.float(5.0, "Max SL Distance (price)", step=0.5, group=grp_risk)
+// Risk — ATR-based SL (adaptive to any price level)
+// Python used 2-5 price fixed on $2070 gold ≈ 0.5-1.2× M5 ATR
+i_sl_atr_min = input.float(0.5, "Min SL (×ATR)", step=0.1, group=grp_risk)
+i_sl_atr_max = input.float(3.0, "Max SL (×ATR)", step=0.1, group=grp_risk)
 i_rr         = input.float(1.5, "Risk:Reward Ratio", step=0.1, group=grp_risk)
 i_max_hold   = input.int(30, "Max Bars to Hold", group=grp_risk)
+i_sl_lookback= input.int(20, "SL Swing Lookback", minval=5, group=grp_risk)
 
 // Visuals
 i_show_labels= input.bool(true, "Show Signal Labels", group=grp_viz)
@@ -86,10 +88,10 @@ is_active  = cur_hour >= i_session_start and cur_hour < i_session_end
 // ═══════════════════════════════════════════════════════════════════
 
 // --- 2a. Swing High / Low Detection (find_swing_points, lookback=5) ---
-is_swing_high = high == ta.highest(high, i_swing_lb * 2 + 1) and 
-                high[i_swing_lb] == ta.highest(high, i_swing_lb * 2 + 1)
-is_swing_low  = low == ta.lowest(low, i_swing_lb * 2 + 1) and 
-                low[i_swing_lb] == ta.lowest(low, i_swing_lb * 2 + 1)
+swing_hi_val = ta.highest(high, i_swing_lb * 2 + 1)
+swing_lo_val = ta.lowest(low, i_swing_lb * 2 + 1)
+is_swing_high = high[i_swing_lb] == swing_hi_val
+is_swing_low  = low[i_swing_lb] == swing_lo_val
 
 // Track recent swings for structural SL
 var float last_swing_low  = na
@@ -188,16 +190,21 @@ dist_swing_high = not na(last_swing_high) and atr_14 > 0 ? (last_swing_high - cl
 //          RSI > 60 = overbought = "model says down" for SHORT
 //   + Must be active session + FVG recently formed + valid SL distance
 
-// Structural SL calculation
-sl_long  = not na(last_swing_low) ? last_swing_low * 0.9999 : low - atr_14
-sl_short = not na(last_swing_high) ? last_swing_high * 1.0001 : high + atr_14
+// Structural SL — find nearest swing within lookback window
+// Uses ta.lowest/ta.highest over i_sl_lookback bars as robust proxy
+recent_swing_low  = ta.lowest(low, i_sl_lookback)
+recent_swing_high = ta.highest(high, i_sl_lookback)
+
+// Use tracked swing if available, fallback to recent extreme
+sl_long  = not na(last_swing_low) ? math.min(last_swing_low, recent_swing_low) - atr_14 * 0.1 : recent_swing_low - atr_14 * 0.1
+sl_short = not na(last_swing_high) ? math.max(last_swing_high, recent_swing_high) + atr_14 * 0.1 : recent_swing_high + atr_14 * 0.1
 
 sl_dist_long  = math.abs(close - sl_long)
 sl_dist_short = math.abs(sl_short - close)
 
-// SL distance filter: 2.0-5.0 price units (Python: sl_dist < 2.0 or sl_dist > 5.0 → skip)
-sl_ok_long  = sl_dist_long >= i_sl_min and sl_dist_long <= i_sl_max
-sl_ok_short = sl_dist_short >= i_sl_min and sl_dist_short <= i_sl_max
+// SL distance filter: ATR-based (adaptive to price level)
+sl_ok_long  = atr_14 > 0 and sl_dist_long >= atr_14 * i_sl_atr_min and sl_dist_long <= atr_14 * i_sl_atr_max
+sl_ok_short = atr_14 > 0 and sl_dist_short >= atr_14 * i_sl_atr_min and sl_dist_short <= atr_14 * i_sl_atr_max
 
 // Full entry conditions
 long_signal  = is_active and trend_up and rsi_14 < i_rsi_os and bull_fvg_active and sl_ok_long
@@ -364,6 +371,6 @@ if i_show_stats and barstate.islast
 // 7. ALERTS (JSON for n8n / Webhook / Telegram)
 // ═══════════════════════════════════════════════════════════════════
 alertcondition(is_buy, title="SMC Engine: BUY",
-     message='{"action":"BUY","symbol":"{{ticker}}","price":{{close}},"sl":' + str.tostring(sl_long) + ',"tp":' + str.tostring(close + sl_dist_long * i_rr) + ',"tf":"{{interval}}"}')
+     message='{"action":"BUY","symbol":"{{ticker}}","price":{{close}},"tf":"{{interval}}"}')
 alertcondition(is_sell, title="SMC Engine: SELL",
-     message='{"action":"SELL","symbol":"{{ticker}}","price":{{close}},"sl":' + str.tostring(sl_short) + ',"tp":' + str.tostring(close - sl_dist_short * i_rr) + ',"tf":"{{interval}}"}')
+     message='{"action":"SELL","symbol":"{{ticker}}","price":{{close}},"tf":"{{interval}}"}')
