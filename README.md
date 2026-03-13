@@ -13,8 +13,8 @@ Một chỉ báo tốt không phải là một chỉ báo hiển thị BÁN/MUA 
 2. **Context (Cấu trúc thị trường):** Tìm kiếm các Key Levels quan trọng như **Order Blocks (OB)**, **Market Structure Breaks (MSB)**, và **Fair Value Gaps (FVG)**. Mọi thứ đều được code từ nguồn tham khảo Github của _hungpixi/xauusd-smc-signal-engine_.
 3. **Trigger (Điểm vào lệnh tối ưu):** Thay vì vào lệnh ngay lập tức lỏng lẻo, thuật toán sẽ chờ giá xuất hiện FVG gần nhất và một tín hiệu Pullback của Momentum (RSI Overbought/Oversold Proxy ML Trigger).
 
-## 📊 Backtest (Python)
-Kèo đi kèm dự án này là framework Backtesting bằng Python dành riêng cho dữ liệu 15 phút của vàng (`XAUUSD_M15.csv`) để liên tục tinh chỉnh bộ tham số.
+## 📊 Backtest (Python & XGBoost)
+Kèm theo dự án Pine Script là framework Backtesting bằng Python **(XGBoost + Smart Money Concepts)**. Test trên dữ liệu 15 phút của vàng (`XAUUSD_M15.csv`) đã cho **Winrate ~49%** và tỷ lệ **EV dương (+0.223R / lệnh)** (Test set split). Hệ thống sử dụng *Structural Stop Losses* (dựa trên Swing High/Low) thay vì ATR cứng nhắc để tránh bị nhiễu.
 
 ## 🚀 Trải Nghiệm Chỉ Báo Trực Quan
 - **UI/UX Tối Ưu:** Các vùng OB, FVG được làm mượt mà, mờ ảo (transparent) tránh che khuất mắt người dùng, theo chuẩn "Medium Brightness".
