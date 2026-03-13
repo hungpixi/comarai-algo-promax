@@ -1,0 +1,195 @@
+// This indicator is an educational algorithmic trading prototype combining SMC, Trend MAs, and Proxy ML Triggers.
+// By: Pham Phu Nguyen Hung (Comarai)
+// GitHub: https://github.com/hungpixi
+// Website: https://comarai.com
+
+//@version=5
+indicator("Comarai Algo ProMax: SMC + Trend + Proxy ML", shorttitle="Comarai ProMax", overlay=True, max_boxes_count=500, max_lines_count=500)
+
+// =========================================================================
+// 1. SETTINGS & INPUTS
+// =========================================================================
+grp_trend   = "1. Trend Filters (CM MAs)"
+grp_smc     = "2. Smart Money Concepts (MSB, OB, FVG)"
+grp_ml      = "3. Proxy ML Trigger"
+grp_display = "4. Display & Styling"
+
+// -- Trend Inputs
+ma_len      = input.int(200, "Trend EMA Length", group=grp_trend)
+use_trend   = input.bool(true, "Use Trend Filter for Signals?", group=grp_trend)
+
+// -- SMC Inputs
+zigzag_len  = input.int(9, "ZigZag Length (Swing Det)", group=grp_smc)
+show_zz     = input.bool(false, "Show ZigZag Lines", group=grp_smc)
+fib_factor  = input.float(0.33, "Fib Factor for Breakout", 0, 1, 0.01, group=grp_smc)
+show_fvg    = input.bool(true, "Show Fair Value Gaps (FVG)", group=grp_smc)
+
+// -- ML Trigger Inputs (Proxy using RSI & ATR context)
+rsi_len     = input.int(14, "RSI Length", group=grp_ml)
+rsi_ob      = input.int(60, "RSI Overbought Boundary", group=grp_ml)
+rsi_os      = input.int(40, "RSI Oversold Boundary", group=grp_ml)
+
+// -- Display Inputs
+show_labels = input.bool(true, "Show Buy/Sell Labels", group=grp_display)
+ob_bull_col = input.color(color.new(color.teal, 80), "Bullish OB Color", group=grp_display)
+ob_bear_col = input.color(color.new(color.maroon, 80), "Bearish OB Color", group=grp_display)
+fvg_bull_col= input.color(color.new(color.green, 90), "Bull FVG Color", group=grp_display)
+fvg_bear_col= input.color(color.new(color.red, 90), "Bear FVG Color", group=grp_display)
+
+// =========================================================================
+// 2. TREND FILTER LOGIC
+// =========================================================================
+trend_ma = ta.ema(close, ma_len)
+is_uptrend = close > trend_ma
+is_downtrend = close < trend_ma
+
+plot(trend_ma, color=is_uptrend ? color.teal : color.maroon, title="Trend EMA", linewidth=2)
+
+// =========================================================================
+// 3. SMC LOGIC: FAIR VALUE GAPS (FVG)
+// =========================================================================
+// FVG Bullish: Gap between Low[0] and High[2] when Low[0] > High[2]
+is_bull_fvg = low > high[2] and close[1] > open[1]
+// FVG Bearish: Gap between High[0] and Low[2] when High[0] < Low[2]
+is_bear_fvg = high < low[2] and close[1] < open[1]
+
+if show_fvg and is_bull_fvg
+    box.new(bar_index[2], high[2], bar_index, low, bgcolor=fvg_bull_col, border_color=color.new(color.green, 100))
+    
+if show_fvg and is_bear_fvg
+    box.new(bar_index[2], low[2], bar_index, high, bgcolor=fvg_bear_col, border_color=color.new(color.red, 100))
+
+// =========================================================================
+// 4. SMC LOGIC: MARKET STRUCTURE BREAK (MSB) & ORDER BLOCKS (OB)
+// =========================================================================
+var float[] highs = array.new_float(5)
+var int[] high_idx = array.new_int(5)
+var float[] lows = array.new_float(5)
+var int[] low_idx = array.new_int(5)
+
+var box[] bu_ob_boxes = array.new_box(0)
+var box[] be_ob_boxes = array.new_box(0)
+
+to_up = high >= ta.highest(zigzag_len)
+to_down = low <= ta.lowest(zigzag_len)
+
+var int trend = 1
+trend := trend == 1 and to_down ? -1 : trend == -1 and to_up ? 1 : nz(trend[1], 1)
+
+last_to_up = ta.barssince(to_up[1])
+low_val = ta.lowest(nz(last_to_up > 0 ? last_to_up : 1, 1))
+low_i = bar_index - ta.barssince(low_val == low)
+
+last_to_down = ta.barssince(to_down[1])
+high_val = ta.highest(nz(last_to_down > 0 ? last_to_down : 1, 1))
+high_i = bar_index - ta.barssince(high_val == high)
+
+if ta.change(trend) != 0
+    if trend == 1
+        array.push(lows, low_val)
+        array.push(low_idx, low_i)
+    if trend == -1
+        array.push(highs, high_val)
+        array.push(high_idx, high_i)
+
+get_val(arr, idx_arr, i) =>
+    sz = array.size(arr)
+    sz > i ? [array.get(arr, sz - 1 - i), array.get(idx_arr, sz - 1 - i)] : [na, na]
+
+[h0, h0i] = get_val(highs, high_idx, 0)
+[h1, h1i] = get_val(highs, high_idx, 1)
+[l0, l0i] = get_val(lows, low_idx, 0)
+[l1, l1i] = get_val(lows, low_idx, 1)
+
+if ta.change(trend) != 0 and show_zz
+    if trend == 1 and not na(h0) and not na(l0i)
+        line.new(h0i, h0, l0i, l0, color=color.gray, style=line.style_dotted)
+    if trend == -1 and not na(l0) and not na(h0i)
+        line.new(l0i, l0, h0i, h0, color=color.gray, style=line.style_dotted)
+
+var int market = 1
+last_l0 = ta.valuewhen(ta.change(market) != 0, l0, 0)
+last_h0 = ta.valuewhen(ta.change(market) != 0, h0, 0)
+market := last_l0 == l0 or last_h0 == h0 ? nz(market[1], 1) : market == 1 and l0 < l1 and l0 < l1 - math.abs(h0 - l1) * fib_factor ? -1 : market == -1 and h0 > h1 and h0 > h1 + math.abs(h1 - l0) * fib_factor ? 1 : nz(market[1], 1)
+
+// -- Simple OB Identification Logic
+// On MSB Bullish -> create Bullish OB from the last down candle
+var int bu_ob_i = bar_index
+if ta.change(market) != 0 and market == 1 and not na(h1)
+    bu_ob_i := bar_index
+    for i = h1i to math.max(l0i[zigzag_len], 1)
+        idx = bar_index - i
+        if open[idx] > close[idx] // Bear candle before move up
+            bu_ob_i := bar_index[idx]
+            break
+    if bu_ob_i != bar_index
+        b = box.new(bu_ob_i, high[bar_index - bu_ob_i], bar_index + 15, low[bar_index - bu_ob_i], bgcolor=ob_bull_col, border_color=na, text="OB+", text_color=color.teal, text_size=size.tiny)
+        array.push(bu_ob_boxes, b)
+        if array.size(bu_ob_boxes) > 5
+            box.delete(array.shift(bu_ob_boxes))
+
+// On MSB Bearish -> create Bearish OB from the last up candle
+var int be_ob_i = bar_index
+if ta.change(market) != 0 and market == -1 and not na(l1)
+    be_ob_i := bar_index
+    for i = l1i to math.max(h0i[zigzag_len], 1)
+        idx = bar_index - i
+        if open[idx] < close[idx] // Bull candle before move down
+            be_ob_i := bar_index[idx]
+            break
+    if be_ob_i != bar_index
+        b = box.new(be_ob_i, high[bar_index - be_ob_i], bar_index + 15, low[bar_index - be_ob_i], bgcolor=ob_bear_col, border_color=na, text="OB-", text_color=color.maroon, text_size=size.tiny)
+        array.push(be_ob_boxes, b)
+        if array.size(be_ob_boxes) > 5
+            box.delete(array.shift(be_ob_boxes))
+
+// Extend active OBs
+for b in bu_ob_boxes
+    if close < box.get_bottom(b)
+        box.set_bgcolor(b, color.new(color.gray, 90)) // Mitigated
+    else
+        box.set_right(b, bar_index + 5)
+
+for b in be_ob_boxes
+    if close > box.get_top(b)
+        box.set_bgcolor(b, color.new(color.gray, 90)) // Mitigated
+    else
+        box.set_right(b, bar_index + 5)
+
+// =========================================================================
+// 5. PROXY ML TRIGGER (RSI + FVG Presence)
+// =========================================================================
+// XGBoost features concluded FVG is crucial.
+// We trigger a LONG if: uptrend + FVG recently formed + price pulled back to RSI oversold
+_rsi = ta.rsi(close, rsi_len)
+prox_bull_fvg_active = ta.barssince(is_bull_fvg) <= 10
+prox_bear_fvg_active = ta.barssince(is_bear_fvg) <= 10
+
+long_cond =  (not use_trend or is_uptrend) and _rsi < rsi_os and prox_bull_fvg_active
+short_cond = (not use_trend or is_downtrend) and _rsi > rsi_ob and prox_bear_fvg_active
+
+// Signal logic
+var int signal = 0
+if long_cond and signal <= 0
+    signal := 1
+else if short_cond and signal >= 0
+    signal := -1
+// Reset signal to allow re-entry
+if _rsi > 50 and signal == 1
+    signal := 0
+if _rsi < 50 and signal == -1
+    signal := 0
+
+is_new_long = signal == 1 and signal[1] <= 0
+is_new_short = signal == -1 and signal[1] >= 0
+
+if show_labels and is_new_long
+    label.new(bar_index, low - ta.atr(14)*0.5, "BUY\n(SMC)", style=label.style_label_up, color=color.teal, textcolor=color.white, size=size.small)
+if show_labels and is_new_short
+    label.new(bar_index, high + ta.atr(14)*0.5, "SELL\n(SMC)", style=label.style_label_down, color=color.maroon, textcolor=color.white, size=size.small)
+
+// =========================================================================
+// 6. ALERTS
+// =========================================================================
+alertcondition(is_new_long, title="SMC Algo ProMax: BUY", message='{"action": "BUY", "symbol": "{{ticker}}", "price": {{close}}}')
+alertcondition(is_new_short, title="SMC Algo ProMax: SELL", message='{"action": "SELL", "symbol": "{{ticker}}", "price": {{close}}}')
